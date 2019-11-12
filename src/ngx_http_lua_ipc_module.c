@@ -13,6 +13,7 @@ static ngx_int_t ngx_http_lua_ipc_channel_lookup(ngx_shm_zone_t *zone,
     ngx_uint_t hash, const char *kdata, size_t klen,
     ngx_http_lua_ipc_channel_t **sdp);
 
+
 static ngx_command_t ngx_http_lua_ipc_cmds[] = {
      { ngx_string("lua_ipc"),
       NGX_HTTP_MAIN_CONF|NGX_CONF_TAKE2,
@@ -389,7 +390,6 @@ ngx_http_lua_ffi_ipc_new(const char *shm_name, const char *chname, size_t size,
         np->size = 0;
         np->refs = 0;
         np->data = NULL;
-        /*np->idx = i + 1;*/
 
         np++;
     }
@@ -489,39 +489,6 @@ ngx_http_lua_ffi_ipc_channel_subscribe(ngx_http_lua_ipc_channel_t *channel,
     return NGX_OK;
 }
 
-/*int ngx_http_lua_ipc_get_next(ngx_http_lua_ipc_list_node_t **node,*/
-    /*uint32_t idx, uint16_t flags)*/
-/*{*/
-    /*// it's been deleted*/
-    /*if ((*node)->idx != idx) {*/
-        /*if (flags & NGX_HTTP_LUA_IPC_SAFE) {*/
-            /*ngx_log_error(NGX_LOG_ALERT, ngx_cycle->log, 0,*/
-                    /*"Msg idx: %d was lost in safe mode!", idx);*/
-            /*return NGX_ERROR;*/
-        /*}*/
-
-        /*uint32_t idx = (*node)->idx;*/
-        /*ngx_http_lua_ipc_list_node_t *tmp;*/
-        /*//skip to next available msg*/
-        /*for(tmp = (*node)->next; tmp->idx > idx && tmp != *node; tmp = tmp->next) {*/
-            /*[> void <]*/
-        /*}*/
-
-        /*if (tmp == *node) {*/
-            /*ngx_log_error(NGX_LOG_ALERT, ngx_cycle->log, 0,*/
-                    /*"iterated completely");*/
-            /*return NGX_ERROR;*/
-        /*}*/
-
-        /**node = tmp;*/
-
-        /*return NGX_OK;*/
-    /*}*/
-/*}*/
-
-/* Currently only returns the message, this has some drawbacks regarding
- * types aswell as additional information like msgs skipped.
- */
 extern int
 ngx_http_lua_ffi_ipc_get_message(ngx_http_lua_ipc_subscriber_t *sub,
     ngx_http_lua_ipc_msg_t **msg)
@@ -633,13 +600,6 @@ extern void ngx_http_lua_ffi_ipc_ack_msg(ngx_http_lua_ipc_subscriber_t *sub,
     sub->idx++;
     sub->node = sub->node->next;
 
-    if (sub->node->data == NULL) {
-        if (sub->node->idx != channel->counter) {
-            ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
-                          "---List integrity error: next msg idx invalid");
-        }
-    }
-
     ngx_shmtx_unlock(&ctx->shpool->mutex);
 }
 
@@ -647,10 +607,10 @@ extern int ngx_http_lua_ffi_ipc_add_msg(ngx_http_lua_ipc_channel_t *channel,
     u_char *msg, ngx_uint_t size)
 {
     ngx_http_lua_ipc_list_node_t *node;
-    ngx_shm_zone_t             *zone;
-    ngx_http_lua_ipc_ctx_t     *ctx;
+    ngx_shm_zone_t               *zone;
+    ngx_http_lua_ipc_ctx_t       *ctx;
     void                         *data = NULL;
-    uint8_t                    safe;
+    uint8_t                       safe;
 
     zone = channel->zone;
     if (zone == NULL) {

@@ -67,15 +67,12 @@ struct ngx_http_lua_ipc_channel_s {
     ngx_shm_zone_t                       *zone;
     ngx_http_lua_ipc_list_node_t         *head;     /* linked list head */
     ngx_http_lua_ipc_list_node_t         *nodes;    /* first element in list*/
-    //chname
-    //nodes...
 };
 
 struct ngx_http_lua_ipc_subscriber_s {
     uint64_t                              idx;
     ngx_http_lua_ipc_list_node_t         *node;
     ngx_http_lua_ipc_channel_t           *channel;
-    //uint16_t                             *awaiting_ack;
 };
 
 extern int ngx_http_lua_ffi_ipc_new(const char* shm_name, const char *chname,
