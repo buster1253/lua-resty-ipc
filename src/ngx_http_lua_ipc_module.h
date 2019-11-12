@@ -67,9 +67,7 @@ struct ngx_http_lua_ffi_ipc_channel_s {
 	uint32_t                              counter;
 	ngx_shm_zone_t                       *zone;
 	ngx_http_lua_ipc_list_node_t         *head;     /* linked list head */
-	ngx_http_lua_ffi_ipc_subscriber_t    *subscribers;
-	ngx_http_lua_ipc_list_node_t         *start;
-	ngx_http_lua_ipc_list_node_t        **nodes;
+	ngx_http_lua_ipc_list_node_t         *nodes;    /* first element in list*/
 	//chname
 	//nodes...
 };

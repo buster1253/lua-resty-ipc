@@ -321,9 +321,7 @@ ngx_http_lua_ffi_ipc_new(const char *shm_name, const char *chname, size_t size,
 		channel->refs++;
 		*out = channel;
 
-		ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "Channel exists");
 		ngx_shmtx_unlock(&ctx->shpool->mutex);
-
 		return NGX_OK;
 	}
 
@@ -343,19 +341,19 @@ ngx_http_lua_ffi_ipc_new(const char *shm_name, const char *chname, size_t size,
 		return NGX_DECLINED;
 	}
 
-	channel = (ngx_http_lua_ffi_ipc_channel_t *) &channel_node->data;
-
 	channel_node->key = hash;
+
+	channel = (ngx_http_lua_ffi_ipc_channel_t *) &channel_node->data;
+	channel->channel_node = channel_node;
 	channel->size = size;
 	channel->name.len = chlen;
 	channel->name.data = (u_char *) &channel->nodes + sizeof(channel->nodes);
-	ngx_memcpy(channel->name.data, chname, chlen);
-	channel->subscribers = NULL;
 	channel->zone = zone;
-	channel->channel_node = channel_node;
 	channel->counter = 0;
+	channel->nodes = (ngx_http_lua_ipc_list_node_t*) channel->name.data
+	                                               + channel->name.len;
 
-	channel->start = channel->name.data + channel->name.len;
+	ngx_memcpy(channel->name.data, chname, chlen);
 
 	if (safe == 1) {
 		channel->flags |= NGX_HTTP_LUA_FFI_IPC_SAFE;
@@ -364,12 +362,9 @@ ngx_http_lua_ffi_ipc_new(const char *shm_name, const char *chname, size_t size,
 		channel->flags |= NGX_HTTP_LUA_FFI_IPC_DESTROY;
 	}
 
-	/*np = (ngx_http_lua_ipc_list_node_t *)&channel->nodes + channel->name.len;*/
-	np = channel->start;
+	np = channel->nodes;
 	channel->head = np;
 	np->idx = 1;
-
-	n = sizeof(ngx_http_lua_ipc_list_node_t);
 
 	for (size_t i = 0; i < size; i++) {
 		if (i == 0) {
@@ -388,7 +383,7 @@ ngx_http_lua_ffi_ipc_new(const char *shm_name, const char *chname, size_t size,
 		np->size = 0;
 		np->refs = 0;
 		np->data = NULL;
-		np->idx = i + 1;
+		/*np->idx = i + 1;*/
 
 		np++;
 	}
@@ -427,7 +422,7 @@ ngx_http_lua_ffi_ipc_channel_subscribe(ngx_http_lua_ffi_ipc_channel_t *channel,
 	if (subscriber == NULL) {
 		ngx_shmtx_unlock(&ctx->shpool->mutex);
 		ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
-				"ipc_subscribe failed: no memory");
+				     "ipc_subscribe failed: no memory");
 		return NGX_ERROR;
 	}
 
