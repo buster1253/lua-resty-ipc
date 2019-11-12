@@ -409,7 +409,7 @@ ngx_http_lua_ffi_ipc_channel_subscribe(ngx_http_lua_ipc_channel_t *channel,
 	int start, ngx_http_lua_ipc_subscriber_t **out)
 {
 	ngx_shm_zone_t                     *zone;
-	ngx_http_lua_ipc_subscriber_t  *subscriber;
+	ngx_http_lua_ipc_subscriber_t      *subscriber;
 	ngx_http_lua_ipc_ctx_t             *ctx;
 
 	zone = channel->zone;
@@ -432,14 +432,30 @@ ngx_http_lua_ffi_ipc_channel_subscribe(ngx_http_lua_ipc_channel_t *channel,
 	}
 
 	if (start == 0) {
-		subscriber->idx = channel->counter + 1;
 		subscriber->node = channel->head;
-		subscriber->node->refs++;
 	}
 	else if (start == -1) {
-		 /* TODO start from tail */
-		subscriber->node->refs++;
+		ngx_http_lua_ipc_list_node_t *node = channel->head->next;
+		if (channel->flags & NGX_HTTP_LUA_IPC_SAFE) {
+			while (node->refs == 0 && node != channel->head) {
+				if (node->data == NULL) { /* debug */
+					ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+							      "NULL data in staring node for safe queue");
+				}
+				node = node->next;
+			}
+		}
+		else {
+			while(node->data == NULL && node != channel->head) {
+				node = node->next;
+			}
+		}
+
+		subscriber->node = node;
 	}
+
+	subscriber->idx = subscriber->node->idx;
+	subscriber->node->refs++;
 
 	subscriber->channel = channel;
 
@@ -506,13 +522,12 @@ ngx_http_lua_ffi_ipc_channel_subscribe(ngx_http_lua_ipc_channel_t *channel,
  */
 extern int
 ngx_http_lua_ffi_ipc_get_message(ngx_http_lua_ipc_subscriber_t *sub,
-	/*char **out)*/
 	ngx_http_lua_ipc_msg_t **msg)
 {
 	ngx_shm_zone_t                 *zone;
 	ngx_http_lua_ipc_ctx_t         *ctx;
 	ngx_http_lua_ipc_list_node_t   *node;
-	ngx_http_lua_ipc_channel_t *channel;
+	ngx_http_lua_ipc_channel_t     *channel;
 	ngx_http_lua_ipc_list_node_t   *tmp;
 	uint32_t                        idx;
 
@@ -541,16 +556,16 @@ ngx_http_lua_ffi_ipc_get_message(ngx_http_lua_ipc_subscriber_t *sub,
 	if (node->idx != sub->idx) {
 		if (channel->flags & NGX_HTTP_LUA_IPC_SAFE) {
 			ngx_log_error(NGX_LOG_ALERT, ngx_cycle->log, 0, "Msg idx: %d was"
-					      " lost in safe mode!", sub->idx);
+					      " lost in safe mode! New idx %d", sub->idx,
+						  node->idx);
 			ngx_shmtx_unlock(&ctx->shpool->mutex);
 			return NGX_ERROR;
 		}
 
 		idx = node->idx;
-		for(tmp = node->next; tmp->idx > idx && tmp->data != NULL && tmp != node
-				; tmp = tmp->next)
-		{
-			/* void */
+		tmp = node->next;
+		while (tmp->idx > idx && tmp->data != NULL && tmp != node) {
+			tmp = tmp->next;
 		}
 
 		(*msg)->skipped = tmp->idx - sub->idx;
@@ -578,7 +593,8 @@ ngx_http_lua_ffi_ipc_get_message(ngx_http_lua_ipc_subscriber_t *sub,
 	(*msg)->size = node->size;
 	(*msg)->idx  = node->idx;
 
-	ngx_log_error(NGX_LOG_NOTICE, ngx_cycle->log, 0, "Fetched msg: %d %s", node->idx, node->data);
+	ngx_log_error(NGX_LOG_NOTICE, ngx_cycle->log, 0, "Fetched msg: %d %s",
+			      node->idx, node->data);
 
 	ngx_shmtx_unlock(&ctx->shpool->mutex);
 
@@ -617,15 +633,31 @@ extern void ngx_http_lua_ffi_ipc_ack_msg(ngx_http_lua_ipc_subscriber_t *sub,
 	sub->idx++;
 	sub->node = sub->node->next;
 
-	if (sub->node->idx == sub->idx) {
+	if (sub->node->data == NULL) {
+		if (sub->node->idx != channel->counter) {
+			ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+					      "---List integrity error: next msg idx invalid");
+		}
+	}
+
+	int diff = sub->node->idx - sub->idx;
+
+	if (diff == 0) {
 		sub->node->refs++;
+	}
+	else if (diff > 0 && channel->flags & NGX_HTTP_LUA_IPC_SAFE) {
+		ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+				      "---List integriy error: safe channel with invalid next"
+					  "sub.idx: %d, node->idx: %d", sub->idx, sub->node->idx);
+	}
+	else {
+		sub->node->refs++;
+		ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+				     "new node refs: %d", sub->node->refs);
 	}
 
 	ngx_shmtx_unlock(&ctx->shpool->mutex);
 }
-
-
-
 
 extern int ngx_http_lua_ffi_ipc_add_msg(ngx_http_lua_ipc_channel_t *channel,
 	u_char *msg, ngx_uint_t size)

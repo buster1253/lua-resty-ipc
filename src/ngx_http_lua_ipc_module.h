@@ -17,6 +17,8 @@
 
 typedef struct ngx_http_lua_ipc_subscriber_s ngx_http_lua_ipc_subscriber_t;
 typedef struct ngx_http_lua_ipc_channel_s    ngx_http_lua_ipc_channel_t;
+typedef struct ngx_http_lua_ipc_list_node_s  ngx_http_lua_ipc_list_node_t;
+typedef struct ngx_http_lua_ipc_msg_s        ngx_http_lua_ipc_msg_t;
 
 typedef struct {
     ngx_rbtree_t                          rbtree;
@@ -38,21 +40,22 @@ typedef struct {
 } ngx_http_lua_ipc_ctx_t;
 
 
-typedef struct ngx_http_lua_ipc_msg_s {
+struct ngx_http_lua_ipc_msg_s {
 	uint32_t                              size;
 	uint32_t                              skipped;
 	uint32_t                              idx;
 	unsigned char                        *data;
-} ngx_http_lua_ipc_msg_t;
+};
 
-typedef struct ngx_http_lua_ipc_list_node_s {
+struct ngx_http_lua_ipc_list_node_s {
 	struct ngx_http_lua_ipc_list_node_s  *next;
 	struct ngx_http_lua_ipc_list_node_s  *prev;
 	size_t                                size;
 	uint8_t	                              refs;
 	uint32_t                              idx; // overflow not handled
+	uint8_t                               next_refs;
 	void                                 *data;
-} ngx_http_lua_ipc_list_node_t;
+};
 
 struct ngx_http_lua_ipc_channel_s {
 	ngx_str_t                             name;
@@ -92,8 +95,6 @@ extern int ngx_http_lua_ffi_ipc_free_subscriber(
 extern int ngx_http_lua_ffi_ipc_get_message(
 	ngx_http_lua_ipc_subscriber_t *subscriber, ngx_http_lua_ipc_msg_t **out);
 
-//static void ngx_http_lua_ipc_rbtree_insert_value(ngx_rbtree_node_t *temp,
-    //ngx_rbtree_node_t *node, ngx_rbtree_node_t *sentinel);
 
 
 #endif /* _NGX_HTTP_LUA_IPC_H_ */
