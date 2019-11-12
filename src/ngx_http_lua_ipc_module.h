@@ -78,7 +78,8 @@ struct ngx_http_lua_ffi_ipc_subscriber_s {
 	uint64_t                              idx;
 	ngx_http_lua_ipc_list_node_t         *node;
 	ngx_http_lua_ffi_ipc_channel_t       *channel;
-	struct ngx_http_lua_ffi_ipc_subscriber_s *next;
+	//uint16_t                             *awaiting_ack;
+	//struct ngx_http_lua_ffi_ipc_subscriber_s *next;
 };
 
 
