@@ -35,65 +35,65 @@ typedef struct {
     ngx_http_lua_ipc_shctx_t             *sh;
     ngx_slab_pool_t                      *shpool;
     ngx_str_t                             name;
-	ngx_http_lua_ipc_conf_t              *conf;
+    ngx_http_lua_ipc_conf_t              *conf;
     ngx_log_t                            *log;
 } ngx_http_lua_ipc_ctx_t;
 
 
 struct ngx_http_lua_ipc_msg_s {
-	uint32_t                              size;
-	uint32_t                              skipped;
-	uint32_t                              idx;
-	unsigned char                        *data;
+    uint32_t                              size;
+    uint32_t                              skipped;
+    uint32_t                              idx;
+    unsigned char                        *data;
 };
 
 struct ngx_http_lua_ipc_list_node_s {
-	struct ngx_http_lua_ipc_list_node_s  *next;
-	struct ngx_http_lua_ipc_list_node_s  *prev;
-	size_t                                size;
-	uint8_t	                              refs;
-	uint32_t                              idx; // overflow not handled
-	uint8_t                               next_refs;
-	void                                 *data;
+    struct ngx_http_lua_ipc_list_node_s  *next;
+    struct ngx_http_lua_ipc_list_node_s  *prev;
+    size_t                                size;
+    uint8_t                               refs;
+    uint32_t                              idx; // overflow not handled
+    void                                 *data;
 };
 
 struct ngx_http_lua_ipc_channel_s {
-	ngx_str_t                             name;
-	ngx_rbtree_node_t                    *channel_node;
-	ngx_uint_t                            size;     /* linked list length */
-	ngx_uint_t                            refs;
-	uint16_t                              flags;    /* destroy;safe; */
-	uint32_t                              counter;
-	ngx_shm_zone_t                       *zone;
-	ngx_http_lua_ipc_list_node_t         *head;     /* linked list head */
-	ngx_http_lua_ipc_list_node_t         *nodes;    /* first element in list*/
-	//chname
-	//nodes...
+    ngx_str_t                             name;
+    ngx_rbtree_node_t                    *channel_node;
+    ngx_uint_t                            size;     /* linked list length */
+    ngx_uint_t                            refs;
+    uint16_t                              flags;    /* destroy;safe; */
+    uint32_t                              counter;
+    uint32_t                              subscribers;
+    ngx_shm_zone_t                       *zone;
+    ngx_http_lua_ipc_list_node_t         *head;     /* linked list head */
+    ngx_http_lua_ipc_list_node_t         *nodes;    /* first element in list*/
+    //chname
+    //nodes...
 };
 
 struct ngx_http_lua_ipc_subscriber_s {
-	uint64_t                              idx;
-	ngx_http_lua_ipc_list_node_t         *node;
-	ngx_http_lua_ipc_channel_t           *channel;
-	//uint16_t                             *awaiting_ack;
+    uint64_t                              idx;
+    ngx_http_lua_ipc_list_node_t         *node;
+    ngx_http_lua_ipc_channel_t           *channel;
+    //uint16_t                             *awaiting_ack;
 };
 
 extern int ngx_http_lua_ffi_ipc_new(const char* shm_name, const char *chname,
-	size_t size, uint8_t safe, uint8_t destroy,
-	ngx_http_lua_ipc_channel_t **out);
+    size_t size, uint8_t safe, uint8_t destroy,
+    ngx_http_lua_ipc_channel_t **out);
 
 extern void ngx_http_lua_ffi_ipc_free_channel(
-	ngx_http_lua_ipc_channel_t **channel);
+    ngx_http_lua_ipc_channel_t **channel);
 
 extern int ngx_http_lua_ffi_ipc_channel_subscribe(
-	ngx_http_lua_ipc_channel_t *channel, int start,
-	ngx_http_lua_ipc_subscriber_t **out);
+    ngx_http_lua_ipc_channel_t *channel, int start,
+    ngx_http_lua_ipc_subscriber_t **out);
 
 extern int ngx_http_lua_ffi_ipc_free_subscriber(
-	ngx_http_lua_ipc_subscriber_t **subcriber);
+    ngx_http_lua_ipc_subscriber_t **subcriber);
 
 extern int ngx_http_lua_ffi_ipc_get_message(
-	ngx_http_lua_ipc_subscriber_t *subscriber, ngx_http_lua_ipc_msg_t **out);
+    ngx_http_lua_ipc_subscriber_t *subscriber, ngx_http_lua_ipc_msg_t **out);
 
 
 
