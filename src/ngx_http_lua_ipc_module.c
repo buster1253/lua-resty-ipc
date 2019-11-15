@@ -6,7 +6,7 @@ static void* ngx_http_ipc_create_main_conf(ngx_conf_t *cf);
 static void ngx_http_lua_ipc_rbtree_insert_value(ngx_rbtree_node_t *temp,
     ngx_rbtree_node_t *node, ngx_rbtree_node_t *sentinel);
 static void ngx_http_lua_ipc_decrement_channel_refs(
-    ngx_http_lua_ipc_channel_t *channel);
+    ngx_http_lua_ipc_channel_t *channel, ngx_http_lua_ipc_ctx_t *ctx);
 static ngx_shm_zone_t* ngx_http_lua_ffi_ipc_get_zone(const char *name,
     ngx_uint_t len);
 static ngx_int_t ngx_http_lua_ipc_channel_lookup(ngx_shm_zone_t *zone,
@@ -412,6 +412,7 @@ ngx_http_lua_ffi_ipc_channel_subscribe(ngx_http_lua_ipc_channel_t *channel,
     ngx_shm_zone_t                   *zone;
     ngx_http_lua_ipc_subscriber_t     *subscriber;
     ngx_http_lua_ipc_ctx_t           *ctx;
+    ngx_http_lua_ipc_list_node_t     *node = channel->head->next;
 
     zone = channel->zone;
     if (zone == NULL) {
@@ -436,7 +437,6 @@ ngx_http_lua_ffi_ipc_channel_subscribe(ngx_http_lua_ipc_channel_t *channel,
         subscriber->node = channel->head;
     }
     else if (start == -1) {
-        ngx_http_lua_ipc_list_node_t *node = channel->head->next;
         if (channel->flags & NGX_HTTP_LUA_IPC_SAFE) {
             while (node->refs == 0 && node != channel->head) {
                 if (node->data == NULL) { /* debug */
@@ -454,32 +454,31 @@ ngx_http_lua_ffi_ipc_channel_subscribe(ngx_http_lua_ipc_channel_t *channel,
 
         subscriber->node = node;
     }
+    else if (start > 0) {
+        // TODO test
+        /* Note we don't verify that the node contains any valid data, as this
+         * will be checked upon fetching a message. */
+        node = channel->head;
+        if (start > node->idx) {
+            return NGX_DECLINED;
+        }
+
+        ngx_uint_t diff = node->idx - start;
+        if (diff > channel->size) {
+            return NGX_DECLINED;
+        }
+
+        if (node - diff < channel->nodes) {
+            diff -= node - channel->nodes;
+        }
+
+        node = node - diff;
+    }
 
     subscriber->idx = subscriber->node->idx;
     subscriber->node->refs++;
 
     subscriber->channel = channel;
-
-    // TODO fix and test this
-    /*else if (start > 0) {*/
-        /*head = channel->head;*/
-        /*if (start > head->idx) {*/
-            /*return NGX_DECLINED;*/
-        /*}*/
-
-        /*ngx_uint_t diff = head->idx - start;*/
-        /*if (diff > channel->size) {*/
-            /*return NGX_DECLINED;*/
-        /*}*/
-
-        /*diff *= sizeof(ngx_http_lua_ipc_list_node_t);*/
-
-        /*if (head - diff < channel->nodes) {*/
-            /*diff -= head - channel->nodes;*/
-        /*}*/
-
-        /*ngx_http_lua_ipc_list_node_t *p = head - diff;*/
-    /*}*/
 
     /*subscriber->curr_idx = channel->head.idx;*/
     channel->refs++;
@@ -666,9 +665,10 @@ extern int ngx_http_lua_ffi_ipc_add_msg(ngx_http_lua_ipc_channel_t *channel,
                 return NGX_DECLINED;
             }
 
-            // can check the size field to check if it's worth freeing the memory
-            ngx_slab_free_locked(ctx->shpool, node->data);
-            data = ngx_slab_alloc_locked(ctx->shpool, size);
+            if (p->data != NULL) {
+                ngx_slab_free_locked(ctx->shpool, node->data);
+                data = ngx_slab_alloc_locked(ctx->shpool, size);
+            }
 
             p = p->next;
         }
@@ -701,15 +701,8 @@ extern int ngx_http_lua_ffi_ipc_add_msg(ngx_http_lua_ipc_channel_t *channel,
 }
 
 static void ngx_http_lua_ipc_decrement_channel_refs(
-    ngx_http_lua_ipc_channel_t *channel)
+    ngx_http_lua_ipc_channel_t *channel, ngx_http_lua_ipc_ctx_t *ctx)
 {
-    ngx_shm_zone_t       *zone;
-    ngx_http_lua_ipc_ctx_t *ctx;
-
-    zone = channel->zone;
-    ctx = zone->data;
-
-    ngx_shmtx_lock(&ctx->shpool->mutex);
 
     channel->refs--;
 
@@ -721,35 +714,49 @@ static void ngx_http_lua_ipc_decrement_channel_refs(
         ngx_slab_free_locked(ctx->shpool, channel_node);
     }
 
-    ngx_shmtx_unlock(&ctx->shpool->mutex);
 }
 
 extern void ngx_http_lua_ffi_ipc_free_channel(
     ngx_http_lua_ipc_channel_t **channel)
 {
+    ngx_shm_zone_t       *zone;
+    ngx_http_lua_ipc_ctx_t *ctx;
+
+    zone = (*channel)->zone;
+    ctx = zone->data;
+
     if (*channel == NULL) {
         return;
     }
 
     ngx_log_error(NGX_LOG_NOTICE, ngx_cycle->log, 0, "freeing channel");
 
-    ngx_http_lua_ipc_decrement_channel_refs(*channel);
+    ngx_shmtx_lock(&ctx->shpool->mutex);
+
+    ngx_http_lua_ipc_decrement_channel_refs(*channel, ctx);
+
+    ngx_shmtx_unlock(&ctx->shpool->mutex);
 
     return;
 }
-extern int ngx_http_lua_ffi_ipc_free_subscriber(
+extern void ngx_http_lua_ffi_ipc_free_subscriber(
     ngx_http_lua_ipc_subscriber_t **sub)
 {
+    ngx_shm_zone_t         *zone;
+    ngx_http_lua_ipc_ctx_t *ctx;
+
     ngx_log_error(NGX_LOG_NOTICE, ngx_cycle->log, 0, "freeing subscriber");
 
-    /* Decrement current node ref count
-     * free from worker
-     * decrement channel ref count
-     * */
+    zone = (*sub)->channel->zone;
+    ctx = zone->data;
 
-    ngx_http_lua_ipc_decrement_channel_refs((*sub)->channel);
+    ngx_shmtx_lock(&ctx->shpool->mutex);
 
-    return 0;
+    ngx_http_lua_ipc_decrement_channel_refs((*sub)->channel, ctx);
+
+    ngx_free(*sub);
+
+    ngx_shmtx_unlock(&ctx->shpool->mutex);
 }
 
 static void ngx_http_lua_ipc_rbtree_insert_value(ngx_rbtree_node_t *temp,

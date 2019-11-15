@@ -86,7 +86,7 @@ extern int ngx_http_lua_ffi_ipc_channel_subscribe(
     ngx_http_lua_ipc_channel_t *channel, int start,
     ngx_http_lua_ipc_subscriber_t **out);
 
-extern int ngx_http_lua_ffi_ipc_free_subscriber(
+extern void ngx_http_lua_ffi_ipc_free_subscriber(
     ngx_http_lua_ipc_subscriber_t **subcriber);
 
 extern int ngx_http_lua_ffi_ipc_get_message(
