@@ -411,9 +411,10 @@ ngx_http_lua_ffi_ipc_channel_subscribe(ngx_http_lua_ipc_channel_t *channel,
     int start, ngx_http_lua_ipc_subscriber_t **out)
 {
     ngx_shm_zone_t                   *zone;
-    ngx_http_lua_ipc_subscriber_t     *subscriber;
+    ngx_http_lua_ipc_subscriber_t    *subscriber;
     ngx_http_lua_ipc_ctx_t           *ctx;
     ngx_http_lua_ipc_list_node_t     *node;
+    ngx_http_lua_ipc_msg_t           *msg;
 
     zone = channel->zone;
     if (zone == NULL) {
@@ -432,6 +433,15 @@ ngx_http_lua_ffi_ipc_channel_subscribe(ngx_http_lua_ipc_channel_t *channel,
         ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
                      "ipc_subscribe failed: no memory");
         return NGX_ERROR;
+    }
+
+    msg = ngx_calloc(sizeof(ngx_http_lua_ipc_msg_t), ngx_cycle->log);
+    if (msg == NULL) {
+        ngx_free(subscriber);
+        ngx_shmtx_unlock(&ctx->shpool->mutex);
+        ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                     "ipc_subscribe failed: no memory");
+        return NGX_DECLINED;
     }
 
     if (start == 0) {
@@ -481,8 +491,10 @@ ngx_http_lua_ffi_ipc_channel_subscribe(ngx_http_lua_ipc_channel_t *channel,
         node = node - diff;
     }
 
+
     subscriber->idx = subscriber->node->idx;
     subscriber->node->refs++;
+    subscriber->msg = msg;
 
     subscriber->channel = channel;
 
@@ -495,14 +507,14 @@ ngx_http_lua_ffi_ipc_channel_subscribe(ngx_http_lua_ipc_channel_t *channel,
 }
 
 extern int
-ngx_http_lua_ffi_ipc_get_message(ngx_http_lua_ipc_subscriber_t *sub,
-    ngx_http_lua_ipc_msg_t **msg)
+ngx_http_lua_ffi_ipc_get_message(ngx_http_lua_ipc_subscriber_t *sub)
 {
-    ngx_shm_zone_t               *zone;
-    ngx_http_lua_ipc_ctx_t       *ctx;
+    ngx_shm_zone_t                 *zone;
+    ngx_http_lua_ipc_ctx_t         *ctx;
     ngx_http_lua_ipc_list_node_t   *node;
-    ngx_http_lua_ipc_channel_t   *channel;
+    ngx_http_lua_ipc_channel_t     *channel;
     ngx_http_lua_ipc_list_node_t   *tmp;
+    ngx_http_lua_ipc_msg_t         *msg;
     uint32_t                        idx;
 
     channel = sub->channel;
@@ -514,17 +526,9 @@ ngx_http_lua_ffi_ipc_get_message(ngx_http_lua_ipc_subscriber_t *sub,
     zone = channel->zone;
     ctx  = zone->data;
 
-    if (*msg == NULL) {
-        *msg = ngx_alloc(sizeof(ngx_http_lua_ipc_msg_t), ngx_cycle->log);
-        if (*msg == NULL) {
-            ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
-                          "Failed to allocate msg");
-
-            return NGX_ERROR;
-        }
-    }
-
     ngx_shmtx_lock(&ctx->shpool->mutex);
+
+    msg = sub->msg;
 
     node = sub->node;
     if (node->idx != sub->idx) {
@@ -542,20 +546,20 @@ ngx_http_lua_ffi_ipc_get_message(ngx_http_lua_ipc_subscriber_t *sub,
             tmp = tmp->next;
         }
 
-        (*msg)->skipped = tmp->idx - sub->idx;
+        msg->skipped = tmp->idx - sub->idx;
         node = tmp;
 
         sub->node = node;
         sub->idx = node->idx;
     }
     else {
-        (*msg)->skipped = 0;
+        msg->skipped = 0;
     }
 
     // TODO alloc a inital size for msg and resize it when necessary rather
     // than freeing and allocing
-    (*msg)->data = ngx_alloc(node->size, ngx_cycle->log);
-    if ((*msg)->data == NULL) {
+    msg->data = ngx_alloc(node->size, ngx_cycle->log);
+    if (msg->data == NULL) {
         ngx_log_error(NGX_LOG_NOTICE, ngx_cycle->log, 0,
                       "Failed to alloc memory");
 
@@ -563,9 +567,9 @@ ngx_http_lua_ffi_ipc_get_message(ngx_http_lua_ipc_subscriber_t *sub,
         return NGX_ERROR;
     }
 
-    ngx_memcpy((*msg)->data, node->data, node->size);
-    (*msg)->size = node->size;
-    (*msg)->idx  = node->idx;
+    ngx_memcpy(msg->data, node->data, node->size);
+    msg->size = node->size;
+    msg->idx  = node->idx;
 
     ngx_shmtx_unlock(&ctx->shpool->mutex);
 
@@ -573,22 +577,22 @@ ngx_http_lua_ffi_ipc_get_message(ngx_http_lua_ipc_subscriber_t *sub,
 }
 
 
-extern void ngx_http_lua_ffi_ipc_ack_msg(ngx_http_lua_ipc_subscriber_t *sub,
-    ngx_http_lua_ipc_msg_t **msg)
-{
+extern void ngx_http_lua_ffi_ipc_ack_msg(ngx_http_lua_ipc_subscriber_t *sub) {
     // ack could possibly request a new message, thus eliviating
     // the ngx.sleep loop while new messages are in the queue
     ngx_http_lua_ipc_ctx_t       *ctx;
-    ngx_http_lua_ipc_channel_t *channel;
+    ngx_http_lua_ipc_channel_t   *channel;
+    ngx_http_lua_ipc_msg_t       *msg;
 
     channel = sub->channel;
     ctx = channel->zone->data;
 
-    ngx_free((*msg)->data);
+    msg = sub->msg;
+    ngx_free(msg->data);
 
     ngx_shmtx_lock(&ctx->shpool->mutex);
 
-    if (sub->node->idx != (*msg)->idx) {
+    if (sub->node->idx != msg->idx) {
         /* get msg will reposition the subscriber */
         ngx_shmtx_unlock(&ctx->shpool->mutex);
         if (channel->flags & NGX_HTTP_LUA_IPC_SAFE) {
