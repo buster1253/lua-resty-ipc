@@ -73,26 +73,26 @@ struct ngx_http_lua_ipc_subscriber_s {
     uint64_t                              idx;
     ngx_http_lua_ipc_list_node_t         *node;
     ngx_http_lua_ipc_channel_t           *channel;
-    ngx_http_lua_ipc_msg_t               *msg;
+    ngx_http_lua_ipc_msg_t                msg;
 };
 
-extern int ngx_http_lua_ffi_ipc_new(const char* shm_name, const char *chname,
+int ngx_http_lua_ffi_ipc_new(const char* shm_name, const char *chname,
     size_t size, uint8_t safe, uint8_t destroy,
     ngx_http_lua_ipc_channel_t **out);
 
-extern void ngx_http_lua_ffi_ipc_free_channel(
+void ngx_http_lua_ffi_ipc_free_channel(
     ngx_http_lua_ipc_channel_t **channel);
 
-extern int ngx_http_lua_ffi_ipc_channel_subscribe(
+int ngx_http_lua_ffi_ipc_channel_subscribe(
     ngx_http_lua_ipc_channel_t *channel, int start,
     ngx_http_lua_ipc_subscriber_t **out);
 
-extern void ngx_http_lua_ffi_ipc_free_subscriber(
+void ngx_http_lua_ffi_ipc_free_subscriber(
     ngx_http_lua_ipc_subscriber_t **subcriber);
 
-extern int ngx_http_lua_ffi_ipc_get_message(
+int ngx_http_lua_ffi_ipc_get_message(
     ngx_http_lua_ipc_subscriber_t *subscriber);
 
-extern void ngx_http_lua_ffi_ipc_ack_msg(ngx_http_lua_ipc_subscriber_t *sub);
+void ngx_http_lua_ffi_ipc_ack_msg(ngx_http_lua_ipc_subscriber_t *sub);
 
 #endif /* _NGX_HTTP_LUA_IPC_H_ */
