@@ -152,7 +152,7 @@ ngx_http_lua_ipc(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     *zp = zone;
 
-    lmcf->requires_shm = 1;
+    /*lmcf->requires_shm = 1;*/
 
     return NGX_CONF_OK;
 }
@@ -396,7 +396,8 @@ ngx_http_lua_ffi_ipc_new(const char *shm_name, const char *chname, size_t size,
 
     ngx_rbtree_insert(&ctx->sh->rbtree, channel_node);
 
-    channel->refs++;
+    /*channel->refs++;*/
+    channel->refs = 1;
     *out = channel;
 
     ngx_shmtx_unlock(&ctx->shpool->mutex);
@@ -412,7 +413,7 @@ ngx_http_lua_ffi_ipc_channel_subscribe(ngx_http_lua_ipc_channel_t *channel,
     ngx_shm_zone_t                   *zone;
     ngx_http_lua_ipc_subscriber_t     *subscriber;
     ngx_http_lua_ipc_ctx_t           *ctx;
-    ngx_http_lua_ipc_list_node_t     *node = channel->head->next;
+    ngx_http_lua_ipc_list_node_t     *node;
 
     zone = channel->zone;
     if (zone == NULL) {
@@ -437,18 +438,23 @@ ngx_http_lua_ffi_ipc_channel_subscribe(ngx_http_lua_ipc_channel_t *channel,
         subscriber->node = channel->head;
     }
     else if (start == -1) {
+        node = channel->head->prev;
+        uint32_t idx = node->idx;
         if (channel->flags & NGX_HTTP_LUA_IPC_SAFE) {
-            while (node->refs == 0 && node != channel->head) {
-                if (node->data == NULL) { /* debug */
+            /* We check for the oldest msg where the data is still valid
+             * This might be changed to only allow those with active refs */
+            while (node->prev->data != NULL && node->prev->idx < idx) {
+                node->refs++;
+                node = node->prev;
+                if (node->data == NULL) { //debug
                     ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
                                   "NULL data in staring node for safe queue");
                 }
-                node = node->next;
             }
         }
         else {
-            while(node->data == NULL && node != channel->head) {
-                node = node->next;
+            while (node->prev->data != NULL && node->prev->idx < idx) {
+                node = node->prev;
             }
         }
 
@@ -546,6 +552,8 @@ ngx_http_lua_ffi_ipc_get_message(ngx_http_lua_ipc_subscriber_t *sub,
         (*msg)->skipped = 0;
     }
 
+    // TODO alloc a inital size for msg and resize it when necessary rather
+    // than freeing and allocing
     (*msg)->data = ngx_alloc(node->size, ngx_cycle->log);
     if ((*msg)->data == NULL) {
         ngx_log_error(NGX_LOG_NOTICE, ngx_cycle->log, 0,
@@ -558,9 +566,6 @@ ngx_http_lua_ffi_ipc_get_message(ngx_http_lua_ipc_subscriber_t *sub,
     ngx_memcpy((*msg)->data, node->data, node->size);
     (*msg)->size = node->size;
     (*msg)->idx  = node->idx;
-
-    ngx_log_error(NGX_LOG_NOTICE, ngx_cycle->log, 0, "Fetched msg: %d %s",
-                  node->idx, node->data);
 
     ngx_shmtx_unlock(&ctx->shpool->mutex);
 
@@ -575,8 +580,6 @@ extern void ngx_http_lua_ffi_ipc_ack_msg(ngx_http_lua_ipc_subscriber_t *sub,
     // the ngx.sleep loop while new messages are in the queue
     ngx_http_lua_ipc_ctx_t       *ctx;
     ngx_http_lua_ipc_channel_t *channel;
-
-    ngx_log_error(NGX_LOG_NOTICE, ngx_cycle->log, 0, "Acking %d", sub->idx);
 
     channel = sub->channel;
     ctx = channel->zone->data;
@@ -603,7 +606,7 @@ extern void ngx_http_lua_ffi_ipc_ack_msg(ngx_http_lua_ipc_subscriber_t *sub,
 }
 
 extern int ngx_http_lua_ffi_ipc_add_msg(ngx_http_lua_ipc_channel_t *channel,
-    u_char *msg, ngx_uint_t size)
+    void *msg, ngx_uint_t size)
 {
     ngx_http_lua_ipc_list_node_t *node;
     ngx_shm_zone_t               *zone;
@@ -634,14 +637,14 @@ extern int ngx_http_lua_ffi_ipc_add_msg(ngx_http_lua_ipc_channel_t *channel,
     if (safe && node->refs > 0) {
         if (node->data != NULL) {
             ngx_shmtx_unlock(&ctx->shpool->mutex);
-            ngx_log_error(NGX_LOG_WARN, ngx_cycle->log, 0,
-                    "A worker is yet to read next message");
             return NGX_DECLINED;
         }
         /* no data so refs have no meaning */
     }
 
     /* TODO This works better with a secondary field: mem_size */
+    /* it will also currently retain a huge chunk if one message
+     * was large, which is wasted if all future ones are small */
     if (node->data != NULL) {
         if (node->size < size) {
             ngx_slab_free_locked(ctx->shpool, node->data);
@@ -722,18 +725,22 @@ extern void ngx_http_lua_ffi_ipc_free_channel(
     ngx_shm_zone_t       *zone;
     ngx_http_lua_ipc_ctx_t *ctx;
 
-    zone = (*channel)->zone;
-    ctx = zone->data;
-
     if (*channel == NULL) {
         return;
     }
 
-    ngx_log_error(NGX_LOG_NOTICE, ngx_cycle->log, 0, "freeing channel");
+    zone = (*channel)->zone;
+    ctx = zone->data;
+
+    /* TODO free the msg ptr */
+
 
     ngx_shmtx_lock(&ctx->shpool->mutex);
 
     ngx_http_lua_ipc_decrement_channel_refs(*channel, ctx);
+
+    ngx_log_error(NGX_LOG_NOTICE, ngx_cycle->log, 0, "decrementing channel"
+                  " refs, current: %d", (*channel)->refs);
 
     ngx_shmtx_unlock(&ctx->shpool->mutex);
 
@@ -742,8 +749,9 @@ extern void ngx_http_lua_ffi_ipc_free_channel(
 extern void ngx_http_lua_ffi_ipc_free_subscriber(
     ngx_http_lua_ipc_subscriber_t **sub)
 {
-    ngx_shm_zone_t         *zone;
-    ngx_http_lua_ipc_ctx_t *ctx;
+    ngx_shm_zone_t               *zone;
+    ngx_http_lua_ipc_ctx_t       *ctx;
+    ngx_http_lua_ipc_list_node_t *node;
 
     ngx_log_error(NGX_LOG_NOTICE, ngx_cycle->log, 0, "freeing subscriber");
 
@@ -753,6 +761,12 @@ extern void ngx_http_lua_ffi_ipc_free_subscriber(
     ngx_shmtx_lock(&ctx->shpool->mutex);
 
     ngx_http_lua_ipc_decrement_channel_refs((*sub)->channel, ctx);
+
+    node = (*sub)->node;
+    while (node->idx >= (*sub)->idx) {
+        node->refs--;
+        node = node->next;
+    }
 
     ngx_free(*sub);
 
