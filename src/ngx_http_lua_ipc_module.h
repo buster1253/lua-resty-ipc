@@ -68,9 +68,10 @@ struct ngx_http_lua_ipc_channel_s {
     uint16_t                              flags;    /* destroy;safe; */
     uint32_t                              counter;
     uint32_t                              subscribers;
+    uint32_t                              def_msg_size;
     ngx_shm_zone_t                       *zone;
     ngx_http_lua_ipc_list_node_t         *head;     /* linked list head */
-    ngx_http_lua_ipc_list_node_t         *nodes;    /* first element in list*/
+    ngx_http_lua_ipc_list_node_t          nodes[0];
 };
 
 struct ngx_http_lua_ipc_subscriber_s {
