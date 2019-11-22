@@ -15,6 +15,10 @@
 #define NGX_HTTP_LUA_IPC_DESTROY  BIT(1)
 #define NGX_HTTP_LUA_IPC_MAX_SIZE 1024
 
+
+//testing
+#define NGX_HTTP_LUA_IPC_DEFAULT_SIZE 256
+
 typedef struct ngx_http_lua_ipc_subscriber_s ngx_http_lua_ipc_subscriber_t;
 typedef struct ngx_http_lua_ipc_channel_s    ngx_http_lua_ipc_channel_t;
 typedef struct ngx_http_lua_ipc_list_node_s  ngx_http_lua_ipc_list_node_t;
@@ -41,19 +45,19 @@ typedef struct {
 
 
 struct ngx_http_lua_ipc_msg_s {
+    uint8_t                               refs;
     uint32_t                              size;
-    uint32_t                              skipped;
+    uint32_t                              memsize;
     uint32_t                              idx;
+    uint32_t                              unread;
+    unsigned char                         type[20];
     unsigned char                        *data;
 };
 
 struct ngx_http_lua_ipc_list_node_s {
     struct ngx_http_lua_ipc_list_node_s  *next;
     struct ngx_http_lua_ipc_list_node_s  *prev;
-    size_t                                size;
-    uint8_t                               refs;
-    uint32_t                              idx; // overflow not handled
-    void                                 *data;
+    ngx_http_lua_ipc_msg_t                msg;
 };
 
 struct ngx_http_lua_ipc_channel_s {
@@ -73,7 +77,8 @@ struct ngx_http_lua_ipc_subscriber_s {
     uint64_t                              idx;
     ngx_http_lua_ipc_list_node_t         *node;
     ngx_http_lua_ipc_channel_t           *channel;
-    ngx_http_lua_ipc_msg_t                msg;
+    uint32_t                              skipped;
+    ngx_http_lua_ipc_msg_t               *msg;
 };
 
 int ngx_http_lua_ffi_ipc_new(const char* shm_name, const char *chname,
